@@ -1,0 +1,143 @@
+---
+title: "OAM Uni Göttingen"
+author: "Najko Jahn"
+date: "1/7/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  echo = TRUE,
+  fig.width = 6,
+  fig.asp = 0.618,
+  out.width = "70%",
+  fig.align = "center",
+  dpi = 300
+)
+```
+
+## Problem Statement: How to avoid double counting of publications using OAM data?
+
+OAM uses GRID organizatioanl identifier scheme, which distinguished between Universities and its Hospitals. However, many libraries serve both institutions. In order to make use of OAM for the preparation of license negotiation, publication records from both the university and its hospital needs to be joined into a single dataset. Here, I present how to avoid double counting when using data from the OAM with R.
+
+## Obtain data from the OAM using the GUI
+
+##  Create a union set that removes duplicates 
+
+```{r}
+library(tidyverse)
+ugoe <- readr::read_delim("data/oam_ugoe.csv", delim = ";")
+umg <- readr::read_delim("data/oam_umg.csv", delim = ";")
+
+union_goe <- dplyr::union(ugoe, umg)
+union_goe
+```
+
+## How many articles were co-published?
+
+```{r}
+dplyr::intersect(ugoe, umg)
+```
+
+## Analysis
+
+
+
+```{r}
+union_goe %>%
+  mutate(Publisher = forcats::fct_infreq(publisherName)) %>%
+  group_by(Publisher, year) %>%
+  summarise(articles = n()) %>%
+  spread(year, articles) %>% 
+  head(20) %>%
+  janitor::adorn_totals(c("row", "col")) %>% 
+  knitr::kable()
+```
+
+### Waffle
+
+```{r}
+waffle_df <- union_goe %>%
+  filter(!is.na(publisherName)) %>%
+  mutate(Publisher = forcats::fct_infreq(publisherName)) %>%
+  mutate(Publisher = forcats::fct_lump(Publisher, n = 10)) %>%
+  group_by(Publisher) %>%
+  summarise(articles = n()) %>%
+  mutate(prop = articles /sum(articles))
+waffle_df %>%
+  knitr::kable()
+```
+
+```{r}
+library(waffle) #devtools::install_git("https://git.rud.is/hrbrmstr/waffle.git")
+library(hrbrthemes)
+library(ggthemes)
+tableau_10 <- ggthemes::ggthemes_data[["tableau"]][["color-palettes"]][["regular"]][["Classic 10"]]
+ggplot(waffle_df, aes(values = prop*100, fill = Publisher)) +
+  geom_waffle(n_rows = 5, size = 0.33, colour = "white", flip = FALSE) +
+  scale_fill_manual("", values = c(tableau_10$value, "grey90"), 
+                    guide = guide_legend(reverse = FALSE,  ncol = 3)) +
+  coord_equal() +
+  labs(
+    title = "Publikationen Universität Göttingen einschließlich UMG 2015-2019",
+    subtitle = "Quelle: Open Access Monitor FZ Jülich"
+  ) +
+  theme_void(base_size = 8) +
+  theme(plot.title = element_text(size = 12)) +
+  theme_enhance_waffle() +
+  theme(legend.position = "bottom",
+         legend.justification = "center")
+```
+
+### Open vs Toll Access Journals
+
+```{r}
+union_goe %>%
+  filter(!is.na(publisherName)) %>%
+  mutate(Publisher = forcats::fct_infreq(publisherName)) %>%
+   mutate(Publisher = forcats::fct_lump(Publisher, n = 10)) %>%
+  mutate(journal_status = ifelse(oaColorName == "Gold", "Fully Open Access Journal", "Closed Access Journal")) %>%
+  group_by(Publisher, journal_status) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  group_by(journal_status) %>%
+  mutate(prop = n / sum(n)) %>%
+  mutate(label = format(sum(n), big.mark   = ",")) %>%
+  mutate(label = paste0(journal_status, " (", label, " Articles)")) %>%
+  ungroup() %>%
+  ggplot(aes(x = "", y = prop, fill = Publisher)) +
+  geom_bar(width = 1,
+           stat = "identity",
+           position = position_stack(reverse = TRUE),
+           color = "white") +
+  facet_wrap( ~ label, ncol = 1) +
+  coord_flip() +
+  scale_fill_manual(
+    "",
+    values  = c(tableau_10$value, "grey90"),
+    guide = guide_legend(reverse = FALSE,  ncol = 4)
+  ) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.1),
+                     labels = scales::percent_format(accuracy = 5L)) +
+  labs(
+    title = "Publikationen Universität Göttingen einschließlich UMG 2015-2019",
+    subtitle = "Nach Open-Access-Status der Zeitschrift. Quelle: Open Access Monitor FZ Jülich",
+    x = "",
+    y = ""
+  ) +
+  #  scale_y_continuous(breaks = seq(0,1, by =0.1), labels = scales::percent_format(accuracy = 5L)) +
+  theme_minimal(base_family = "Roboto", base_size = 8) +
+  theme(panel.grid.minor = element_blank()) +
+  theme(axis.ticks = element_blank()) +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.border = element_blank()) +
+  theme(legend.position = "bottom",
+        legend.justification = "center")
+```
+
+
+
